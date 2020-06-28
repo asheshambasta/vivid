@@ -54,34 +54,34 @@ scServerState :: SCServerState
 -- See the above note about this use of unsafePerformIO:
 scServerState = unsafePerformIO makeEmptySCServerState
 
-data SCServerState
-   = SCServerState
-   -- We use 'IORef Maybe's instead of MVars so we can use weak pointer
-   --   finalizers with older versions of GHC:
-  { _scServerState_socketConnectStarted :: TVar Bool
-  , _scServerState_socket :: !(TMVar Socket) -- !(TVar (Maybe Socket))
-  , _scServerState_listener :: !(TMVar ThreadId) -- !(TVar (Maybe ThreadId))
-
-  , _scServerState_availableBufferIds :: !(TVar [BufferId])
-  , _scServerState_maxBufIds :: !(TVar Int32)
-  , _scServerState_availableNodeIds :: !(TVar [NodeId])
-  , _scServerState_availableSyncIds :: !(TVar [SyncId])
-  , _scServerState_syncIdMailboxes :: !(TVar (Map SyncId (MVar ())))
-  , _scServerState_serverMessageFunction :: !(TVar (OSC -> IO ()))
-  , _scServerState_definedSDs :: !(TVar (Set (SDName, Int))) -- Int is the hash
-  }
+data SCServerState = SCServerState
+    { _scServerState_socketConnectStarted  :: TVar Bool
+    -- !(TVar (Maybe Socket))
+    , _scServerState_socket                :: !(TMVar Socket) -- !(TVar (Maybe Socket))
+    -- !(TVar (Maybe ThreadId))
+    , _scServerState_listener              :: !(TMVar ThreadId) -- !(TVar (Maybe ThreadId))
+    , _scServerState_availableBufferIds    :: !(TVar [BufferId])
+    , _scServerState_maxBufIds             :: !(TVar Int32)
+    , _scServerState_availableNodeIds      :: !(TVar [NodeId])
+    , _scServerState_availableSyncIds      :: !(TVar [SyncId])
+    , _scServerState_syncIdMailboxes       :: !(TVar (Map SyncId (MVar ())))
+    , _scServerState_serverMessageFunction :: !(TVar (OSC -> IO ()))
+    -- Int is the hash
+    , _scServerState_definedSDs            :: !(TVar (Set (SDName, Int))) -- Int is the hash
+    }
 
 setClientId :: Int32 -> IO ()
-setClientId clientId = do
-   when (clientId < 0 || clientId > 31) $
+setClientId clientId
+  | clientId < 0 || clientId > 31 =
       error "client id must be betw 0 and 31"
-   atomically $ writeTVar (_scServerState_availableNodeIds scServerState) $
+  | otherwise =
       -- The client id is the first 5 bits of a positive int:
       -- Note the incrementing gets weird once we hit the (.&.) -- should
       -- fix if anyone plans to use more than 33 million nodes
-      (flip map) [1000..] $ \nodeNum -> NodeId $
-         ((clientId `shiftL` ((finiteBitSize nodeNum-5)-1)) .|.) $
-            ((maxBound `shiftR` 5) .&. nodeNum)
+      let mkNodeId nodeNum = NodeId .
+                             ((clientId `shiftL` ((finiteBitSize nodeNum-5)-1)) .|.) $
+                             ((maxBound `shiftR` 5) .&. nodeNum)
+      in atomically . writeTVar (_scServerState_availableNodeIds scServerState) $ mkNodeId <$> [1000..]
 
 numberOfSyncIdsToDrop :: Int
 numberOfSyncIdsToDrop = 10000
@@ -95,14 +95,14 @@ makeEmptySCServerState = do -- atomically $ do
    sockIORef <- newEmptyTMVarIO -- newTVar Nothing -- newIORef Nothing
    listenerIORef <- newEmptyTMVarIO -- newTVar Nothing -- newIORef Nothing
 
-   availBufIds <- newTVarIO $ drop 512 $ map BufferId [0..]
+   availBufIds <- newTVarIO . drop 512 $ map BufferId [0..]
    -- these'll be allocated when we connect (and get a clientId):
    availNodeIds <- newTVarIO $ map (NodeId . ((1 `shiftL` 26) .|.)) [1000..]
    maxBufIds <- newTVarIO 1024
    syncIds <- newTVarIO $ drop numberOfSyncIdsToDrop $ map SyncId [0..]
-   syncMailboxes <- newTVarIO $ Map.empty
-   serverMessageFunction <- newTVarIO $ \_ -> return ()
-   definedSDs <- newTVarIO $ Set.empty
+   syncMailboxes <- newTVarIO Map.empty
+   serverMessageFunction <- newTVarIO (const . return $ ())
+   definedSDs <- newTVarIO Set.empty
 
    return $ SCServerState
           { _scServerState_socketConnectStarted = sockConnectStarted

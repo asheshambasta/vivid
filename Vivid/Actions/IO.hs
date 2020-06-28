@@ -117,7 +117,7 @@ instance VividAction IO where
          oscWSync $ \syncId ->
             callOSC $
                SCCmd.d_recv [sdToLiteral synthDef] (Just $ SCCmd.sync syncId)
-         atomically $ modifyTVar (_scServerState_definedSDs scServerState) $
+         atomically . modifyTVar (_scServerState_definedSDs scServerState) $
             ((name, hash synthDef) `Set.insert`)
 
 -- | Synchronous
@@ -126,6 +126,6 @@ defineSDFromFile theSD = do
    tempDir <- getTemporaryDirectory
    let fName = tempDir++"/" ++ show (hash theSD) ++ ".scsyndef"
    BS.writeFile fName $ encodeSD theSD
-   oscWSync $ \syncId ->
-      callOSC $ SCCmd.d_load fName (Just $ SCCmd.sync syncId)
+   oscWSync $
+      callOSC . SCCmd.d_load fName . Just . SCCmd.sync
 
